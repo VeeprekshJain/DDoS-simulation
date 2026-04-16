@@ -1,7 +1,7 @@
 const axios = require('axios');
 const http = require('http');
 
-const TARGET_URL = 'http://localhost:3001/api/data';
+const TARGET_URL = 'http://192.168.1.12:3001/api/data';
 let attackInterval = null;
 let autoStopTimeout = null;
 let activeConnections = [];
@@ -65,7 +65,7 @@ function slowloris(count) {
     currentMode = modes.SLOWLORIS;
     for (let i = 0; i < safeCount; i++) {
         const options = {
-            hostname: 'localhost',
+            hostname: '192.168.1.12',
             port: 3001,
             path: '/',
             method: 'GET',

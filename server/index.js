@@ -122,7 +122,7 @@ io.on('connection', (socket) => {
     });
 });
 
-server.listen(PORT, () => {
-    console.log(`Target Server running at http://localhost:${PORT}`);
+server.listen(PORT, '0.0.0.0', () => {
+    console.log(`Target Server running at http://0.0.0.0:${PORT} (accessible at http://192.168.138.1:${PORT})`);
     console.log(`WebSocket Metrics enabled on port ${PORT}`);
 });
